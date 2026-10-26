@@ -28,18 +28,27 @@ PRODUCTS = [
         "env": "POLAR_SCANLEAD_PRO_MONTHLY_PRODUCT_ID",
         "name": "ScanLead Pro (Monthly)",
         "description": "ScanLead Pro — branded PDF, 500 saved scans, rescan/diff",
-        "price": 99900,  # paise? Polar uses smallest currency unit — for INR often paise; for USD cents
-        "currency": "usd",  # Polar MoR commonly USD; adjust if org supports INR presentment
-        "amount": 1200,  # $12 ≈ ₹999 presentation; change in dashboard if needed
+        # Polar amounts are minor units; ScanLead org presentment is INR → paise
+        "currency": "inr",
+        "amount": 99900,  # ₹999
         "interval": "month",
     },
     {
         "env": "POLAR_SCANLEAD_PRO_YEARLY_PRODUCT_ID",
         "name": "ScanLead Pro (Yearly)",
         "description": "ScanLead Pro yearly",
-        "currency": "usd",
-        "amount": 9600,  # $96/yr
+        "currency": "inr",
+        "amount": 799900,  # ₹7999
         "interval": "year",
+    },
+    {
+        "env": "POLAR_SCANLEAD_DEEP_ONCE_PRODUCT_ID",
+        "name": "ScanLead Deep Brief (One-time)",
+        # Polar INR one-time floor is ₹60 (sandbox/production)
+        "description": "One Pro-style branded security brief credit — ₹60",
+        "currency": "inr",
+        "amount": 6000,  # ₹60
+        "interval": None,  # one-time
     },
 ]
 
@@ -57,10 +66,9 @@ def main() -> int:
     exports: list[str] = []
     with httpx.Client(timeout=30.0, headers=headers) as client:
         for spec in PRODUCTS:
-            body = {
+            body: dict = {
                 "name": spec["name"],
                 "description": spec["description"],
-                "recurring_interval": spec["interval"],
                 "prices": [
                     {
                         "amount_type": "fixed",
@@ -69,6 +77,8 @@ def main() -> int:
                     }
                 ],
             }
+            if spec.get("interval"):
+                body["recurring_interval"] = spec["interval"]
             res = client.post(f"{BASE}/products/", json=body)
             if res.status_code >= 400:
                 print(f"FAIL {spec['name']}: {res.status_code} {res.text[:500]}", file=sys.stderr)

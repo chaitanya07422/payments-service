@@ -29,6 +29,12 @@ class GrantBody(BaseModel):
     days: int = Field(default=30, ge=1, le=3660)
 
 
+class ConsumeCreditBody(BaseModel):
+    product_id: str
+    user_ref: str
+    delta: int = Field(default=1, ge=1, le=100)
+
+
 @router.get("/health")
 async def health(request: Request) -> dict[str, Any]:
     settings = request.app.state.settings
@@ -95,19 +101,29 @@ async def create_checkout(
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # Mock path: activate Pro immediately so success_url sync works without Polar
+    # Mock path: activate entitlement immediately so success_url sync works without Polar
     if result.mock:
-        days = 365 if plan.interval == "year" else 30
-        expires = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
-        await request.app.state.store.upsert(
-            product_id=body.product_id,
-            user_ref=body.user_ref,
-            plan="pro",
-            expires_at=expires,
-            provider="mock",
-            provider_ref=result.provider_ref,
-            metadata={"plan_id": body.plan_id},
-        )
+        if plan.id in ("deep_scan_once", "deep_once") or plan.interval == "once":
+            await request.app.state.store.add_credits(
+                product_id=body.product_id,
+                user_ref=body.user_ref,
+                delta=1,
+                provider="mock",
+                provider_ref=result.provider_ref,
+                metadata={"plan_id": body.plan_id},
+            )
+        else:
+            days = 365 if plan.interval == "year" else 30
+            expires = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+            await request.app.state.store.upsert(
+                product_id=body.product_id,
+                user_ref=body.user_ref,
+                plan="pro",
+                expires_at=expires,
+                provider="mock",
+                provider_ref=result.provider_ref,
+                metadata={"plan_id": body.plan_id},
+            )
 
     return {
         "checkout_url": result.checkout_url,
@@ -148,12 +164,14 @@ async def get_entitlement(
                 plan = "free"
         except ValueError:
             pass
+    deep_credits = max(0, int(doc.get("deep_credits") or 0))
     return {
         "product_id": product_id,
         "user_ref": user_ref,
         "plan": plan if active else "free",
         "expires_at": expires if active else None,
         "active": active,
+        "deep_credits": deep_credits,
         "provider": doc.get("provider"),
     }
 
@@ -184,6 +202,21 @@ async def polar_webhook(request: Request) -> dict[str, str]:
     if not patch:
         return {"ok": "ignored"}
 
+    if patch.credits_delta or patch.plan == "credit":
+        doc = await request.app.state.store.add_credits(
+            product_id=patch.product_id,
+            user_ref=patch.user_ref,
+            delta=patch.credits_delta or 1,
+            provider=patch.provider,
+            provider_ref=patch.provider_ref,
+            metadata=patch.metadata,
+        )
+        return {
+            "ok": "applied",
+            "plan": doc.get("plan") or "free",
+            "deep_credits": doc.get("deep_credits") or 0,
+        }
+
     await request.app.state.store.upsert(
         product_id=patch.product_id,
         user_ref=patch.user_ref,
@@ -194,6 +227,29 @@ async def polar_webhook(request: Request) -> dict[str, str]:
         metadata=patch.metadata,
     )
     return {"ok": "applied", "plan": patch.plan}
+
+
+@router.post("/entitlements/consume-credit")
+async def consume_credit(
+    body: ConsumeCreditBody,
+    request: Request,
+    x_product_key: Optional[str] = Header(default=None, alias="X-Product-Key"),
+) -> dict[str, Any]:
+    await require_product(request, body.product_id, x_product_key)
+    doc = await request.app.state.store.add_credits(
+        product_id=body.product_id,
+        user_ref=body.user_ref,
+        delta=-abs(int(body.delta)),
+        provider="scanlead",
+        provider_ref="consume",
+        metadata={"action": "consume"},
+    )
+    return {
+        "ok": True,
+        "deep_credits": max(0, int(doc.get("deep_credits") or 0)),
+        "product_id": body.product_id,
+        "user_ref": body.user_ref,
+    }
 
 
 @router.post("/admin/grant")

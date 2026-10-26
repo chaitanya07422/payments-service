@@ -24,6 +24,18 @@ class EntitlementStore:
     ) -> dict[str, Any]:
         raise NotImplementedError
 
+    async def add_credits(
+        self,
+        *,
+        product_id: str,
+        user_ref: str,
+        delta: int,
+        provider: str,
+        provider_ref: str | None = None,
+        metadata: dict | None = None,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
     async def get(self, product_id: str, user_ref: str) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
@@ -49,8 +61,9 @@ class MemoryEntitlementStore(EntitlementStore):
         metadata: dict | None = None,
     ) -> dict[str, Any]:
         key = (product_id, user_ref)
+        prev = self._ents.get(key) or {}
         doc = {
-            "id": self._ents.get(key, {}).get("id") or str(uuid4()),
+            "id": prev.get("id") or str(uuid4()),
             "product_id": product_id,
             "user_ref": user_ref,
             "plan": plan,
@@ -58,11 +71,41 @@ class MemoryEntitlementStore(EntitlementStore):
             "provider": provider,
             "provider_ref": provider_ref,
             "metadata": metadata or {},
+            "deep_credits": int(prev.get("deep_credits") or 0),
             "updated_at": _now(),
-            "created_at": self._ents.get(key, {}).get("created_at") or _now(),
+            "created_at": prev.get("created_at") or _now(),
         }
         self._ents[key] = doc
         return deepcopy(doc)
+
+    async def add_credits(
+        self,
+        *,
+        product_id: str,
+        user_ref: str,
+        delta: int,
+        provider: str,
+        provider_ref: str | None = None,
+        metadata: dict | None = None,
+    ) -> dict[str, Any]:
+        key = (product_id, user_ref)
+        prev = self._ents.get(key) or {
+            "id": str(uuid4()),
+            "product_id": product_id,
+            "user_ref": user_ref,
+            "plan": "free",
+            "expires_at": None,
+            "deep_credits": 0,
+            "created_at": _now(),
+        }
+        prev["deep_credits"] = max(0, int(prev.get("deep_credits") or 0) + int(delta))
+        prev["provider"] = provider
+        prev["provider_ref"] = provider_ref
+        if metadata:
+            prev["metadata"] = {**(prev.get("metadata") or {}), **metadata}
+        prev["updated_at"] = _now()
+        self._ents[key] = prev
+        return deepcopy(prev)
 
     async def get(self, product_id: str, user_ref: str) -> Optional[dict[str, Any]]:
         doc = self._ents.get((product_id, user_ref))
@@ -118,6 +161,50 @@ class MongoEntitlementStore(EntitlementStore):
         doc = await self._ents.find_one(
             {"product_id": product_id, "user_ref": user_ref}, {"_id": 0}
         )
+        return doc or {}
+
+    async def add_credits(
+        self,
+        *,
+        product_id: str,
+        user_ref: str,
+        delta: int,
+        provider: str,
+        provider_ref: str | None = None,
+        metadata: dict | None = None,
+    ) -> dict[str, Any]:
+        now = _now()
+        await self._ents.update_one(
+            {"product_id": product_id, "user_ref": user_ref},
+            {
+                "$inc": {"deep_credits": int(delta)},
+                "$set": {
+                    "provider": provider,
+                    "provider_ref": provider_ref,
+                    "updated_at": now,
+                    **({"metadata": metadata} if metadata else {}),
+                },
+                "$setOnInsert": {
+                    "id": str(uuid4()),
+                    "product_id": product_id,
+                    "user_ref": user_ref,
+                    "plan": "free",
+                    "expires_at": None,
+                    "created_at": now,
+                },
+            },
+            upsert=True,
+        )
+        # Clamp at zero if somehow negative
+        doc = await self._ents.find_one(
+            {"product_id": product_id, "user_ref": user_ref}, {"_id": 0}
+        )
+        if doc and int(doc.get("deep_credits") or 0) < 0:
+            await self._ents.update_one(
+                {"product_id": product_id, "user_ref": user_ref},
+                {"$set": {"deep_credits": 0}},
+            )
+            doc["deep_credits"] = 0
         return doc or {}
 
     async def get(self, product_id: str, user_ref: str) -> Optional[dict[str, Any]]:

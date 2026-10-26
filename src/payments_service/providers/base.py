@@ -23,6 +23,7 @@ class EntitlementPatch:
     provider: str
     provider_ref: str | None = None
     metadata: dict | None = None
+    credits_delta: int = 0
 
 
 class PaymentProvider(Protocol):

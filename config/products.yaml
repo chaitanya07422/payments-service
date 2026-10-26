@@ -23,6 +23,12 @@ products:
         currency: INR
         interval: year
         polar_product_id_env: POLAR_SCANLEAD_PRO_YEARLY_PRODUCT_ID
+      - id: deep_scan_once
+        name: Deep scan brief
+        price: 60
+        currency: INR
+        interval: once
+        polar_product_id_env: POLAR_SCANLEAD_DEEP_ONCE_PRODUCT_ID
 
   jobpilot:
     name: JobPilot

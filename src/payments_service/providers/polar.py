@@ -155,6 +155,18 @@ class PolarProvider:
             if not product_id or not user_ref:
                 log.warning("webhook missing product_id/user_ref metadata: %s", event_type)
                 return None
+            # One-time deep brief credit — does not change subscription plan
+            if plan_id in ("deep_scan_once", "deep_once") or "deep_scan" in plan_id:
+                return EntitlementPatch(
+                    product_id=product_id,
+                    user_ref=user_ref,
+                    plan="credit",
+                    expires_at=None,
+                    provider=self.name,
+                    provider_ref=str(data.get("id") or ""),
+                    metadata={"event": event_type, "plan_id": plan_id},
+                    credits_delta=1,
+                )
             days = 365 if "year" in plan_id else 30
             expires = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
             return EntitlementPatch(
