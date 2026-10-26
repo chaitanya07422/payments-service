@@ -44,4 +44,12 @@ curl -X POST http://127.0.0.1:8100/v1/admin/grant \
 
 ## Deploy (jogi)
 
-Service listens on `:8100`. Proxy `/pay/` or subdomain to it; Polar webhook must hit the public webhook path.
+Service listens on `:8100`. NPM proxies `https://vulscan.duckdns.org/pay/` → `:8100/`.
+
+Polar webhook URL (sandbox or production):
+
+```text
+https://vulscan.duckdns.org/pay/v1/webhooks/polar
+```
+
+ScanLead API uses `PAYMENTS_SERVICE_URL=http://127.0.0.1:8100` and `PAYMENTS_KEY_SCANLEAD`.
