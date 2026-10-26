@@ -1,0 +1,99 @@
+name: Deploy payments-service to Oracle
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-payments-service
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[dev]"
+
+      - name: Unit tests
+        run: pytest tests/ -q
+        env:
+          ALLOW_MOCK_PROVIDER: "true"
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Ensure dirs
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            'mkdir -p /home/ubuntu/apps/payments-service/logs'
+
+      - name: Rsync payments-service
+        run: |
+          rsync -az --delete \
+            -e 'ssh -i ~/.ssh/deploy_key' \
+            --exclude .venv \
+            --exclude .env \
+            --exclude .git \
+            --exclude __pycache__ \
+            --exclude .pytest_cache \
+            --exclude '*.pyc' \
+            --exclude logs \
+            ./ \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/ubuntu/apps/payments-service/"
+
+      - name: Install + reload PM2
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" 'set -e
+            APP=/home/ubuntu/apps/payments-service
+            cd "$APP"
+            if [ ! -f .env ]; then
+              echo "Missing $APP/.env — create it on the VM before deploy"
+              exit 1
+            fi
+            if [ ! -d .venv ]; then
+              python3 -m venv .venv
+            fi
+            .venv/bin/pip install -U pip
+            .venv/bin/pip install -e .
+
+            export PATH="$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node 2>/dev/null | tail -1)/bin:/usr/bin:$PATH"
+            command -v pm2 >/dev/null || { echo "pm2 not installed"; exit 1; }
+
+            # PM2 7 startOrReload can crash on .cjs; delete + start is reliable
+            pm2 delete payments-service 2>/dev/null || true
+            pm2 start "$APP/ecosystem.config.cjs" --update-env
+            pm2 save
+
+            for i in $(seq 1 20); do
+              if curl -sf http://127.0.0.1:8100/health >/dev/null; then
+                echo "payments-service healthy"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "Health check failed"
+            pm2 logs payments-service --lines 40 --nostream || true
+            exit 1
+          '

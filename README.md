@@ -44,6 +44,8 @@ curl -X POST http://127.0.0.1:8100/v1/admin/grant \
 
 ## Deploy (jogi)
 
+GitHub Actions (`.github/workflows/deploy.yml`) deploys on push to `main` (same `DEPLOY_*` secrets as ScanLead). Manual: **Actions → Deploy payments-service to Oracle → Run workflow**.
+
 Service listens on `:8100`. NPM proxies `https://vulscan.duckdns.org/pay/` → `:8100/`.
 
 Polar webhook URL (sandbox or production):
