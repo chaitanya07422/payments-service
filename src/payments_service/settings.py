@@ -30,8 +30,20 @@ class Settings(BaseSettings):
     allow_mock_provider: bool = True
 
 
+def _load_dotenv() -> None:
+    """Load .env into os.environ without overriding existing keys."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    root = Path(__file__).resolve().parents[2]
+    load_dotenv(root / ".env", override=False)
+    load_dotenv(Path.cwd() / ".env", override=False)
+
+
 @lru_cache
 def get_settings() -> Settings:
+    _load_dotenv()
     return Settings(
         polar_access_token=os.getenv("POLAR_ACCESS_TOKEN") or None,
         polar_webhook_secret=os.getenv("POLAR_WEBHOOK_SECRET") or None,
