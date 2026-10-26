@@ -1,0 +1,42 @@
+# Multi-tenant product catalog. Polar product UUIDs come from env / sync script.
+products:
+  scanlead:
+    name: ScanLead
+    api_key_env: PAYMENTS_KEY_SCANLEAD
+    plans:
+      - id: free
+        name: Free
+        price: 0
+        currency: INR
+        interval: null
+        polar_product_id_env: null
+      - id: pro_monthly
+        name: Pro
+        price: 999
+        currency: INR
+        interval: month
+        # Set after scripts/ensure_polar_catalog.py or dashboard create
+        polar_product_id_env: POLAR_SCANLEAD_PRO_MONTHLY_PRODUCT_ID
+      - id: pro_yearly
+        name: Pro yearly
+        price: 7999
+        currency: INR
+        interval: year
+        polar_product_id_env: POLAR_SCANLEAD_PRO_YEARLY_PRODUCT_ID
+
+  jobpilot:
+    name: JobPilot
+    api_key_env: PAYMENTS_KEY_JOBPILOT
+    plans:
+      - id: free
+        name: Free
+        price: 0
+        currency: USD
+        interval: null
+        polar_product_id_env: null
+      - id: pro_monthly
+        name: Pro
+        price: 29
+        currency: USD
+        interval: month
+        polar_product_id_env: POLAR_JOBPILOT_PRO_MONTHLY_PRODUCT_ID
